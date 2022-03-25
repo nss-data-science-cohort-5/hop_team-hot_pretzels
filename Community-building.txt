@@ -1,0 +1,33 @@
+CREATE CONSTRAINT ON (f:Facility) ASSERT f.to_npi IS UNIQUE;
+CREATE CONSTRAINT ON (p:Provider) ASSERT p.from_npi IS UNIQUE;
+
+:auto USING PERIODIC COMMIT
+LOAD CSV WITH HEADERS
+FROM 'file:///referrals_big_filtered' AS line
+WITH line
+
+MERGE(from:Provider{from_npi:line.from_npi}) 
+MERGE(to:Facility{to_npi:line.to_npi}) SET to.org=line.organization_to
+
+CREATE (from)-[:REFERRAL {patient_count: toInteger(line.patient_count)}]->(to)
+
+
+CALL gds.graph.create(
+    'hopteams',
+    ['Facility','Provider'],
+    {
+        REFERRAL:{
+            orientation:'UNDIRECTED',
+            aggregation:'SUM'
+        }        
+    },
+    {
+        relationshipProperties: 'patient_count'
+    }
+)
+
+CALL gds.louvain.stream('hopteams',{relationshipWeightProperty: 'patient_count'})
+YIELD nodeId,communityId
+RETURN gds.util.asNode(nodeId).from_npi AS from_npi,
+gds.util.asNode(nodeId).to_npi AS to_npi, communityId
+
